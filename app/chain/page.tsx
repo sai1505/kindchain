@@ -1,8 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import {
+    IconArrowLeft,
+    IconSun,
+    IconMoonStars,
+} from "@tabler/icons-react";
 
 type Act = {
     id: string;
@@ -13,16 +18,40 @@ type Act = {
     verified_at: string | null;
 };
 
-type User = {
-    id: string;
-    name: string;
+type User = { id: string; name: string };
+
+type ChainLink = { act: Act; giver: User; receiver: User };
+
+type TreeNode = {
+    key: string;
+    user: User;
+    incomingAct: Act | null;
+    children: TreeNode[];
 };
 
-type ChainLink = {
-    act: Act;
-    giver: User;
-    receiver: User;
+type PositionedNode = {
+    key: string;
+    x: number;
+    y: number;
+    name: string;
+    type: string | null;
+    isYou: boolean;
 };
+
+type Edge = {
+    key: string;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    type: string;
+};
+
+const NODE_W = 148;
+const NODE_H = 60;
+const H_GAP = 28;
+const LEVEL_H = 118;
+const PAD = 40;
 
 export default function ChainPage() {
     const router = useRouter();
@@ -30,17 +59,31 @@ export default function ChainPage() {
     const [chain, setChain] = useState<ChainLink[]>([]);
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
+    const [isDark, setIsDark] = useState(false);
+
+    useEffect(() => {
+        const stored = localStorage.getItem("kindchain_theme");
+        const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const dark = stored ? stored === "dark" : prefersDark;
+        setIsDark(dark);
+        document.documentElement.classList.toggle("dark", dark);
+    }, []);
+
+    function toggleTheme() {
+        const next = !isDark;
+        setIsDark(next);
+        document.documentElement.classList.toggle("dark", next);
+        localStorage.setItem("kindchain_theme", next ? "dark" : "light");
+    }
 
     useEffect(() => {
         async function loadChain() {
             const userId = localStorage.getItem("kindchain_user_id");
-
             if (!userId) {
                 router.push("/");
                 return;
             }
 
-            // Current user
             const { data: user } = await supabase
                 .from("users")
                 .select("id, name")
@@ -51,37 +94,22 @@ export default function ChainPage() {
                 router.push("/");
                 return;
             }
-
             setCurrentUser(user);
 
-            // All verified acts
             const { data: acts, error: actsError } = await supabase
                 .from("acts")
-                .select(
-                    "id, giver_id, receiver_id, type, description, verified_at"
-                )
+                .select("id, giver_id, receiver_id, type, description, verified_at")
                 .eq("status", "verified")
                 .order("verified_at", { ascending: true });
 
-            if (actsError) {
-                console.error(actsError);
+            if (actsError || !acts || acts.length === 0) {
+                if (actsError) console.error(actsError);
                 setLoading(false);
                 return;
             }
 
-            if (!acts || acts.length === 0) {
-                setLoading(false);
-                return;
-            }
-
-            // Get all users involved in the chain
             const userIds = Array.from(
-                new Set(
-                    acts.flatMap((act) => [
-                        act.giver_id,
-                        act.receiver_id,
-                    ])
-                )
+                new Set(acts.flatMap((act) => [act.giver_id, act.receiver_id]))
             );
 
             const { data: users, error: usersError } = await supabase
@@ -95,28 +123,16 @@ export default function ChainPage() {
                 return;
             }
 
-            const userMap = new Map(
-                (users ?? []).map((user) => [user.id, user])
-            );
+            const userMap = new Map((users ?? []).map((u) => [u.id, u]));
 
             const links: ChainLink[] = acts
                 .map((act) => {
                     const giver = userMap.get(act.giver_id);
                     const receiver = userMap.get(act.receiver_id);
-
-                    if (!giver || !receiver) {
-                        return null;
-                    }
-
-                    return {
-                        act,
-                        giver,
-                        receiver,
-                    };
+                    if (!giver || !receiver) return null;
+                    return { act, giver, receiver };
                 })
-                .filter(
-                    (link): link is ChainLink => link !== null
-                );
+                .filter((link): link is ChainLink => link !== null);
 
             setChain(links);
             setLoading(false);
@@ -125,247 +141,328 @@ export default function ChainPage() {
         loadChain();
     }, [router]);
 
-    /*
-     * Build the chain around the current user.
-     *
-     * We start with acts where the current user RECEIVED help,
-     * then follow acts where that receiver later became a GIVER.
-     */
-
-    const forwardChain: ChainLink[] = [];
-
-    if (currentUser) {
-        let personId = currentUser.id;
-
-        const visited = new Set<string>();
-
-        while (!visited.has(personId)) {
-            visited.add(personId);
-
-            const link = chain.find(
-                (item) =>
-                    item.act.giver_id === personId &&
-                    !visited.has(item.act.receiver_id)
-            );
-
-            if (!link) {
-                break;
-            }
-
-            forwardChain.push(link);
-            personId = link.receiver.id;
-        }
+    // Walk every outgoing act at each person, recursively — one person can
+    // help several people, so this is a tree, not a single path.
+    function buildChildren(personId: string, ancestry: Set<string>): TreeNode[] {
+        const nextAncestry = new Set(ancestry).add(personId);
+        return chain
+            .filter((link) => link.act.giver_id === personId && !ancestry.has(link.receiver.id))
+            .map((link) => ({
+                key: link.act.id,
+                user: link.receiver,
+                incomingAct: link.act,
+                children: buildChildren(link.receiver.id, nextAncestry),
+            }));
     }
 
-    const kindnessGenerations = forwardChain.length;
+    const root: TreeNode | null = useMemo(() => {
+        if (!currentUser) return null;
+        const incoming = chain.find((l) => l.receiver.id === currentUser.id);
+        return {
+            key: incoming ? incoming.act.id : "root",
+            user: currentUser,
+            incomingAct: incoming ? incoming.act : null,
+            children: buildChildren(currentUser.id, new Set(incoming ? [incoming.giver.id] : [])),
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentUser, chain]);
+
+    // Lay the tree out into (x, y) positions + edges for the SVG graph.
+    const { nodes, edges, width, height, treeSize, depth } = useMemo(() => {
+        const positioned: PositionedNode[] = [];
+        const edgeList: Edge[] = [];
+        let maxDepthSeen = 0;
+
+        function layout(node: TreeNode, level: number, xStart: number): { center: number; nextX: number } {
+            maxDepthSeen = Math.max(maxDepthSeen, level);
+
+            if (node.children.length === 0) {
+                const center = xStart + NODE_W / 2;
+                positioned.push({
+                    key: node.key,
+                    x: center,
+                    y: level * LEVEL_H,
+                    name: node.user.name,
+                    type: node.incomingAct?.type ?? null,
+                    isYou: node.user.id === currentUser?.id,
+                });
+                return { center, nextX: xStart + NODE_W + H_GAP };
+            }
+
+            let cursor = xStart;
+            const childCenters: number[] = [];
+            node.children.forEach((child) => {
+                const { center, nextX } = layout(child, level + 1, cursor);
+                childCenters.push(center);
+                cursor = nextX;
+            });
+
+            const center = (childCenters[0] + childCenters[childCenters.length - 1]) / 2;
+            positioned.push({
+                key: node.key,
+                x: center,
+                y: level * LEVEL_H,
+                name: node.user.name,
+                type: node.incomingAct?.type ?? null,
+                isYou: node.user.id === currentUser?.id,
+            });
+
+            node.children.forEach((child, i) => {
+                edgeList.push({
+                    key: `${node.key}-${child.key}`,
+                    x1: center,
+                    y1: level * LEVEL_H + NODE_H,
+                    x2: childCenters[i],
+                    y2: (level + 1) * LEVEL_H,
+                    type: child.incomingAct?.type ?? "",
+                });
+            });
+
+            return { center, nextX: cursor };
+        }
+
+        let treeWidth = NODE_W;
+        let count = 0;
+
+        function countNodes(n: TreeNode): number {
+            return 1 + n.children.reduce((sum, c) => sum + countNodes(c), 0);
+        }
+
+        if (root) {
+            const result = layout(root, 0, 0);
+            treeWidth = Math.max(result.nextX - H_GAP, NODE_W);
+            count = countNodes(root);
+        }
+
+        return {
+            nodes: positioned,
+            edges: edgeList,
+            width: treeWidth + PAD * 2,
+            height: (maxDepthSeen + 1) * LEVEL_H + PAD,
+            treeSize: count,
+            depth: maxDepthSeen,
+        };
+    }, [root, currentUser]);
 
     if (loading) {
         return (
-            <main className="min-h-screen bg-zinc-50 flex items-center justify-center">
-                <p className="text-zinc-500">
-                    Following your kindness...
-                </p>
+            <main className="flex min-h-screen items-center justify-center bg-[var(--bg)]">
+                <p className="text-[var(--muted)]">Following your kindness…</p>
             </main>
         );
     }
 
     return (
-        <main className="min-h-screen bg-zinc-50 text-zinc-900">
+        <>
+            <style jsx global>{`
+        @import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap");
 
-            {/* Header */}
+        :root {
+          --bg: #ffffff;
+          --surface: #ffffff;
+          --text: #0a0a0a;
+          --muted: #6b6b6b;
+          --border: #e4e4e4;
+          --border-soft: #ececec;
+          --invert-bg: #0a0a0a;
+          --invert-text: #ffffff;
+        }
 
-            <header className="border-b border-zinc-200 bg-white">
-                <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
+        html.dark {
+          --bg: #0a0a0a;
+          --surface: #141414;
+          --text: #f5f5f5;
+          --muted: #a0a0a0;
+          --border: #2a2a2a;
+          --border-soft: #1f1f1f;
+          --invert-bg: #f5f5f5;
+          --invert-text: #0a0a0a;
+        }
 
-                    <button
-                        onClick={() => router.push("/community")}
-                        className="text-xl font-bold tracking-tight"
-                    >
-                        KINDCHAIN
-                    </button>
+        html,
+        body {
+          background: var(--bg);
+        }
+      `}</style>
 
-                    <button
-                        onClick={() => router.push("/community")}
-                        className="text-sm font-medium text-zinc-500 hover:text-zinc-900"
-                    >
-                        Community →
-                    </button>
+            <main className="min-h-screen bg-[var(--bg)] text-[var(--text)] transition-colors duration-300">
+                <div className="mx-auto max-w-4xl px-6 py-10">
+                    {/* Top row */}
+                    <div className="mb-10 flex items-center justify-between">
+                        <button
+                            onClick={() => router.push("/community")}
+                            className="flex items-center gap-1.5 text-sm font-medium text-[var(--muted)] transition hover:text-[var(--text)]"
+                        >
+                            <IconArrowLeft size={15} stroke={2} />
+                            Back to community
+                        </button>
 
-                </div>
-            </header>
+                        <button
+                            onClick={toggleTheme}
+                            aria-label="Toggle dark mode"
+                            className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--text)]"
+                        >
+                            {isDark ? <IconSun size={17} stroke={1.75} /> : <IconMoonStars size={17} stroke={1.75} />}
+                        </button>
+                    </div>
 
-            <div className="mx-auto max-w-3xl px-6 py-12">
-
-                {/* Hero */}
-
-                <section className="text-center">
-
-                    <p className="text-sm font-medium uppercase tracking-widest text-zinc-400">
-                        Your impact
-                    </p>
-
-                    <h1 className="mt-4 text-5xl font-bold tracking-tight">
-                        Your kindness
-                        <br />
-                        keeps moving.
-                    </h1>
-
-                    <p className="mx-auto mt-5 max-w-xl text-lg leading-relaxed text-zinc-500">
-                        Every act creates a possibility for another act.
-                    </p>
-
-                </section>
-
-                {/* Stats */}
-
-                <section className="mt-12 grid grid-cols-2 gap-4">
-
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-6 text-center">
-                        <p className="text-4xl font-bold">
-                            {kindnessGenerations}
+                    {/* Hero */}
+                    <div className="mb-10 text-center">
+                        <p className="text-sm font-medium uppercase tracking-widest text-[var(--muted)]">
+                            Your impact
                         </p>
-
-                        <p className="mt-2 text-sm text-zinc-500">
-                            generations of kindness
+                        <h1
+                            className="mt-4 text-4xl leading-tight sm:text-5xl"
+                            style={{ fontFamily: "Fraunces, serif" }}
+                        >
+                            Your kindness
+                            <br />
+                            keeps spreading.
+                        </h1>
+                        <p className="mx-auto mt-4 max-w-xl text-lg text-[var(--muted)]">
+                            Every act creates a possibility for another act.
                         </p>
                     </div>
 
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-6 text-center">
-                        <p className="text-4xl font-bold">
-                            {forwardChain.length + 1}
-                        </p>
-
-                        <p className="mt-2 text-sm text-zinc-500">
-                            people in your chain
-                        </p>
-                    </div>
-
-                </section>
-
-                {/* Chain */}
-
-                <section className="mt-14">
-
-                    <div className="mb-8">
-                        <h2 className="text-2xl font-semibold">
-                            Your chain
-                        </h2>
-
-                        <p className="mt-1 text-zinc-500">
-                            See where one act of kindness led.
-                        </p>
-                    </div>
-
-                    {forwardChain.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-zinc-300 bg-white p-10 text-center">
-
-                            <div className="text-4xl">
-                                🌱
-                            </div>
-
-                            <h3 className="mt-4 text-lg font-semibold">
-                                Your chain is just beginning.
-                            </h3>
-
-                            <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-zinc-500">
-                                Once someone you helped pays the kindness
-                                forward, you'll see the chain grow here.
+                    {/* Stats */}
+                    <div className="mb-12 grid grid-cols-2 gap-4">
+                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center">
+                            <p className="text-4xl" style={{ fontFamily: "Fraunces, serif" }}>
+                                {depth}
                             </p>
+                            <p className="mt-2 text-sm text-[var(--muted)]">generations deep</p>
+                        </div>
+                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center">
+                            <p className="text-4xl" style={{ fontFamily: "Fraunces, serif" }}>
+                                {treeSize}
+                            </p>
+                            <p className="mt-2 text-sm text-[var(--muted)]">people in your network</p>
+                        </div>
+                    </div>
 
+                    {/* Graph */}
+                    <div className="mb-6">
+                        <h2 className="text-2xl" style={{ fontFamily: "Fraunces, serif" }}>
+                            Your network
+                        </h2>
+                        <p className="mt-1 text-[var(--muted)]">
+                            Everyone your kindness reached, and everyone it reached after that.
+                        </p>
+                    </div>
+
+                    {!root || root.children.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] p-10 text-center">
+                            <p className="font-medium">Your network is just beginning.</p>
+                            <p className="mx-auto mt-2 max-w-md text-sm text-[var(--muted)]">
+                                Once someone you helped pays it forward, the graph will branch here.
+                            </p>
                         </div>
                     ) : (
-                        <div className="relative">
-
-                            {/* Vertical line */}
-
-                            <div className="absolute left-6 top-8 bottom-8 w-px bg-zinc-200" />
-
-                            <div className="space-y-6">
-
-                                {forwardChain.map((link, index) => (
-                                    <div
-                                        key={link.act.id}
-                                        className="relative flex gap-5"
-                                    >
-
-                                        {/* Node */}
-
-                                        <div className="relative z-10 flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white font-semibold">
-                                            {index + 1}
-                                        </div>
-
-                                        {/* Card */}
-
-                                        <div className="flex-1 rounded-2xl border border-zinc-200 bg-white p-5">
-
-                                            <div className="flex items-center justify-between gap-4">
-
-                                                <div>
-                                                    <p className="font-semibold">
-                                                        {link.giver.name}
-                                                    </p>
-
-                                                    <p className="text-sm text-zinc-400">
-                                                        helped
-                                                    </p>
-
-                                                    <p className="mt-1 font-semibold">
-                                                        {link.receiver.name}
-                                                    </p>
-                                                </div>
-
-                                                <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium">
-                                                    {link.act.type}
-                                                </span>
-
-                                            </div>
-
-                                            {link.act.description && (
-                                                <p className="mt-4 text-sm leading-relaxed text-zinc-500">
-                                                    {link.act.description}
-                                                </p>
-                                            )}
-
-                                        </div>
-
-                                    </div>
+                        <div className="overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                            <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="mx-auto">
+                                {edges.map((edge) => (
+                                    <path
+                                        key={edge.key}
+                                        d={`M ${edge.x1 + PAD} ${edge.y1 + PAD} C ${edge.x1 + PAD} ${edge.y1 + PAD + 30
+                                            }, ${edge.x2 + PAD} ${edge.y2 + PAD - 30}, ${edge.x2 + PAD} ${edge.y2 + PAD}`}
+                                        fill="none"
+                                        stroke="var(--border)"
+                                        strokeWidth={1.5}
+                                    />
                                 ))}
 
-                            </div>
-
+                                {nodes.map((node) => (
+                                    <g key={node.key} transform={`translate(${node.x + PAD - NODE_W / 2}, ${node.y + PAD})`}>
+                                        <rect
+                                            width={NODE_W}
+                                            height={NODE_H}
+                                            rx={12}
+                                            fill={node.isYou ? "var(--invert-bg)" : "var(--surface)"}
+                                            stroke={node.isYou ? "var(--invert-bg)" : "var(--border)"}
+                                            strokeWidth={1}
+                                        />
+                                        <text
+                                            x={NODE_W / 2}
+                                            y={NODE_H / 2 - 8}
+                                            textAnchor="middle"
+                                            fontSize="13"
+                                            fontWeight={600}
+                                            fill={node.isYou ? "var(--invert-text)" : "var(--text)"}
+                                        >
+                                            {node.name.length > 16 ? `${node.name.slice(0, 15)}…` : node.name}
+                                            {node.isYou ? " (you)" : ""}
+                                        </text>
+                                        {node.type && (
+                                            <text
+                                                x={NODE_W / 2}
+                                                y={NODE_H / 2 + 12}
+                                                textAnchor="middle"
+                                                fontSize="11"
+                                                fill={node.isYou ? "var(--invert-text)" : "var(--muted)"}
+                                                opacity={node.isYou ? 0.75 : 1}
+                                            >
+                                                {node.type}
+                                            </text>
+                                        )}
+                                    </g>
+                                ))}
+                            </svg>
                         </div>
                     )}
 
-                </section>
+                    {/* Share KINDCHAIN */}
+                    <div className="mt-14 rounded-3xl bg-[var(--invert-bg)] p-8 text-center text-[var(--invert-text)]">
+                        <p className="text-sm font-medium tracking-wide opacity-70">
+                            KINDCHAIN
+                        </p>
 
-                {/* Pass it forward */}
+                        <h2
+                            className="mt-3 text-3xl"
+                            style={{ fontFamily: "Fraunces, serif" }}
+                        >
+                            Someone helped you.
+                        </h2>
 
-                <section className="mt-14 rounded-3xl bg-zinc-900 p-8 text-center text-white">
+                        <p className="mx-auto mt-3 max-w-lg leading-relaxed opacity-80">
+                            You don&apos;t owe them anything.
+                            <br />
+                            Help someone else discover KINDCHAIN.
+                        </p>
 
-                    <p className="text-sm font-medium text-zinc-400">
-                        KINDCHAIN
-                    </p>
+                        <button
+                            onClick={async () => {
+                                const shareData = {
+                                    title: "KINDCHAIN",
+                                    text: "One good deed shouldn’t end with you. Join KINDCHAIN and pass kindness forward.",
+                                    url: window.location.origin,
+                                };
 
-                    <h2 className="mt-3 text-3xl font-semibold">
-                        Someone helped you.
-                    </h2>
+                                try {
+                                    if (navigator.share) {
+                                        await navigator.share(shareData);
+                                    } else {
+                                        await navigator.clipboard.writeText(
+                                            `${shareData.text}\n${shareData.url}`
+                                        );
 
-                    <p className="mx-auto mt-3 max-w-lg leading-relaxed text-zinc-400">
-                        You don't owe them anything.
-                        <br />
-                        Just pass it forward.
-                    </p>
+                                        alert("KINDCHAIN link copied!");
+                                    }
+                                } catch (error) {
+                                    // User closed the share dialog — nothing to do.
+                                    console.log("Share cancelled");
+                                }
+                            }}
+                            className="mt-7 rounded-xl bg-[var(--invert-text)] px-6 py-3 font-medium text-[var(--invert-bg)] transition hover:opacity-85"
+                        >
+                            Share KINDCHAIN ↗
+                        </button>
 
-                    <button
-                        onClick={() => router.push("/community")}
-                        className="mt-7 rounded-xl bg-white px-6 py-3 font-medium text-zinc-900 transition hover:bg-zinc-200"
-                    >
-                        Pass it forward →
-                    </button>
-
-                </section>
-
-            </div>
-        </main>
+                        <p className="mt-4 text-xs opacity-50">
+                            One good deed shouldn&apos;t end with you.
+                        </p>
+                    </div>
+                </div>
+            </main>
+        </>
     );
 }

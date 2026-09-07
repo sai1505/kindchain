@@ -10,19 +10,26 @@ import {
     IconBell,
     IconArrowRight,
     IconLifebuoy,
-    IconHeartHandshake,
     IconBulb,
     IconTool,
     IconGift,
     IconSparkles,
+    IconUserCircle,
+    IconLogout,
 } from "@tabler/icons-react";
 
 type Need = {
     id: string;
+    user_id: string;
     title: string;
     description: string | null;
     type: string;
     status: string;
+};
+
+type Profile = {
+    name: string;
+    email: string;
 };
 
 // Best-guess icon per need type, falling back to a generic one.
@@ -41,6 +48,8 @@ export default function CommunityPage() {
     const [loading, setLoading] = useState(true);
     const [notifCount, setNotifCount] = useState(0);
     const [isDark, setIsDark] = useState(false);
+    const [profile, setProfile] = useState<Profile | null>(null);
+    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
     // Theme: same CSS-variable approach and storage key as the landing page.
     useEffect(() => {
@@ -57,6 +66,10 @@ export default function CommunityPage() {
         document.documentElement.classList.toggle("dark", next);
         localStorage.setItem("kindchain_theme", next ? "dark" : "light");
     }
+
+    useEffect(() => {
+        setCurrentUserId(localStorage.getItem("kindchain_user_id"));
+    }, []);
 
     useEffect(() => {
         async function loadNeeds() {
@@ -101,8 +114,33 @@ export default function CommunityPage() {
         loadNotifications();
     }, []);
 
+    // Who's currently signed in, for the profile hover card.
+    useEffect(() => {
+        async function loadProfile() {
+            const userId = localStorage.getItem("kindchain_user_id");
+            if (!userId) return;
+
+            const { data, error } = await supabase
+                .from("users")
+                .select("name, email")
+                .eq("id", userId)
+                .maybeSingle();
+
+            if (!error && data) {
+                setProfile(data);
+            }
+        }
+
+        loadProfile();
+    }, []);
+
     function scrollToNeeds() {
         document.getElementById("needs")?.scrollIntoView({ behavior: "smooth" });
+    }
+
+    function handleLogout() {
+        localStorage.removeItem("kindchain_user_id");
+        router.push("/");
     }
 
     return (
@@ -148,11 +186,30 @@ export default function CommunityPage() {
                                 className="text-[17px] tracking-tight"
                                 style={{ fontFamily: "Fraunces, serif" }}
                             >
-                                KindChain
+                                Kind Chain
                             </span>
                         </div>
 
                         <div className="flex items-center gap-3">
+                            {/* Profile: hover (or focus) to see who's signed in */}
+                            <div className="group relative">
+                                <button
+                                    aria-label="Your account"
+                                    className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--text)]"
+                                >
+                                    <IconUserCircle size={19} stroke={1.75} />
+                                </button>
+
+                                <div className="pointer-events-none absolute right-0 top-full z-10 mt-2 w-56 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
+                                    <p className="truncate text-sm font-medium text-[var(--text)]">
+                                        {profile?.name ?? "Not signed in"}
+                                    </p>
+                                    <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
+                                        {profile?.email ?? ""}
+                                    </p>
+                                </div>
+                            </div>
+
                             <button
                                 onClick={() => router.push("/activity")}
                                 aria-label={
@@ -188,6 +245,15 @@ export default function CommunityPage() {
                                 ) : (
                                     <IconMoonStars size={17} stroke={1.75} />
                                 )}
+                            </button>
+
+                            <button
+                                onClick={handleLogout}
+                                aria-label="Log out"
+                                title="Log out"
+                                className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--text)]"
+                            >
+                                <IconLogout size={17} stroke={1.75} />
                             </button>
                         </div>
                     </div>
@@ -248,46 +314,6 @@ export default function CommunityPage() {
                                 />
                             </button>
                         </div>
-
-                        <div
-                            onClick={scrollToNeeds}
-                            role="button"
-                            tabIndex={0}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === " ") scrollToNeeds();
-                            }}
-                            className="group cursor-pointer rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-7 text-left transition hover:-translate-y-1 hover:border-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--text)]"
-                        >
-                            <span className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--border)]">
-                                <IconHeartHandshake size={20} stroke={1.75} />
-                            </span>
-
-                            <h3
-                                className="mt-5 text-xl"
-                                style={{ fontFamily: "Fraunces, serif" }}
-                            >
-                                I want to help
-                            </h3>
-
-                            <p className="mt-2 text-[var(--muted)]">
-                                See what people need.
-                            </p>
-
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    scrollToNeeds();
-                                }}
-                                className="mt-6 flex items-center gap-1.5 rounded text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--text)]"
-                            >
-                                Browse needs
-                                <IconArrowRight
-                                    size={15}
-                                    stroke={2}
-                                    className="transition group-hover:translate-x-0.5"
-                                />
-                            </button>
-                        </div>
                     </section>
 
                     {/* Community */}
@@ -317,6 +343,8 @@ export default function CommunityPage() {
                         <div className="space-y-4">
                             {needs.map((need) => {
                                 const Icon = iconForType(need.type);
+                                const isOwn = currentUserId !== null && need.user_id === currentUserId;
+
                                 return (
                                     <article
                                         key={need.id}
@@ -341,13 +369,19 @@ export default function CommunityPage() {
                                                 </div>
                                             </div>
 
-                                            <button
-                                                onClick={() => router.push(`/act/${need.id}`)}
-                                                className="flex shrink-0 items-center gap-1.5 rounded-xl bg-[var(--invert-bg)] px-4 py-2.5 text-sm font-medium text-[var(--invert-text)] transition hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--text)] focus-visible:ring-offset-2"
-                                            >
-                                                I can help
-                                                <IconArrowRight size={15} stroke={2} />
-                                            </button>
+                                            {isOwn ? (
+                                                <span className="shrink-0 rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--muted)]">
+                                                    Your request
+                                                </span>
+                                            ) : (
+                                                <button
+                                                    onClick={() => router.push(`/act/${need.id}`)}
+                                                    className="flex shrink-0 items-center gap-1.5 rounded-xl bg-[var(--invert-bg)] px-4 py-2.5 text-sm font-medium text-[var(--invert-text)] transition hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--text)] focus-visible:ring-offset-2"
+                                                >
+                                                    I can help
+                                                    <IconArrowRight size={15} stroke={2} />
+                                                </button>
+                                            )}
                                         </div>
                                     </article>
                                 );

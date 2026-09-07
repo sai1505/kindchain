@@ -59,7 +59,7 @@ export default function Home() {
 
   async function handleEnter() {
     if (!name.trim() || !email.trim()) {
-      setError("Please enter your name and email.");
+      setError("Please enter your username and email.");
       return;
     }
 
@@ -236,13 +236,13 @@ export default function Home() {
             {/* Right: form card */}
             <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-8">
               <p className="mb-6 text-sm text-[var(--muted)]">
-                Join with your name and email — takes a few seconds.
+                Join with username and email — takes a few seconds.
               </p>
 
               <div className="space-y-4">
                 <div>
                   <label className="mb-2 block text-sm font-medium text-[var(--text)]">
-                    Your name
+                    User Name
                   </label>
                   <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] px-3.5 py-3 transition focus-within:border-[var(--text)]">
                     <IconUser size={17} stroke={1.75} className="text-[var(--muted)]" />
