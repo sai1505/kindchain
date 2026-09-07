@@ -3,6 +3,7 @@
 import { useState, useEffect, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { RippleButton } from "@/components/ui/ripple-button";
 import {
   IconLink,
   IconSun,
@@ -165,7 +166,7 @@ export default function Home() {
               </span>
             </div>
 
-            <button
+            <RippleButton
               onClick={toggleTheme}
               aria-label="Toggle dark mode"
               className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--text)]"
@@ -175,7 +176,7 @@ export default function Home() {
               ) : (
                 <IconMoonStars size={17} stroke={1.75} />
               )}
-            </button>
+            </RippleButton>
           </header>
 
           {/* Main content */}
@@ -244,7 +245,7 @@ export default function Home() {
                   <label className="mb-2 block text-sm font-medium text-[var(--text)]">
                     User Name
                   </label>
-                  <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] px-3.5 py-3 transition focus-within:border-[var(--text)]">
+                  <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] px-3.5 py-3 transition focus-within:border-[1.5px] focus-within:border-[var(--text)]">
                     <IconUser size={17} stroke={1.75} className="text-[var(--muted)]" />
                     <input
                       type="text"
@@ -261,7 +262,7 @@ export default function Home() {
                   <label className="mb-2 block text-sm font-medium text-[var(--text)]">
                     Your email
                   </label>
-                  <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] px-3.5 py-3 transition focus-within:border-[var(--text)]">
+                  <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] px-3.5 py-3 transition focus-within:border-[1.5px] focus-within:border-[var(--text)]">
                     <IconMail size={17} stroke={1.75} className="text-[var(--muted)]" />
                     <input
                       type="email"
@@ -274,15 +275,14 @@ export default function Home() {
                   </div>
                 </div>
 
-                <button
+                <RippleButton
                   onClick={handleEnter}
                   disabled={loading}
                   className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--invert-bg)] px-4 py-3.5 font-medium text-[var(--invert-text)] transition hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--text)] focus-visible:ring-offset-2 disabled:opacity-50"
                   style={{ colorScheme: isDark ? "dark" : "light" }}
                 >
-                  {loading ? "Entering…" : "Enter KindChain"}
-                  {!loading && <IconArrowRight size={17} stroke={2} />}
-                </button>
+                  {loading ? "Entering…" : "Enter KindChain ->"}
+                </RippleButton>
 
                 {error && <p className="text-sm text-[var(--text)]">{error}</p>}
               </div>

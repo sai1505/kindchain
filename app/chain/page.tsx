@@ -60,6 +60,7 @@ export default function ChainPage() {
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
     const [isDark, setIsDark] = useState(false);
+    const [copied, setCopied] = useState(false);
 
     useEffect(() => {
         const stored = localStorage.getItem("kindchain_theme");
@@ -68,6 +69,23 @@ export default function ChainPage() {
         setIsDark(dark);
         document.documentElement.classList.toggle("dark", dark);
     }, []);
+
+    async function handleShare() {
+        const url = window.location.origin;
+
+        if (navigator.share) {
+            try {
+                await navigator.share({ title: "KindChain", url });
+            } catch {
+                // user closed the share sheet — nothing to do
+            }
+            return;
+        }
+
+        await navigator.clipboard.writeText(url);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    }
 
     function toggleTheme() {
         const next = !isDark;
@@ -410,56 +428,29 @@ export default function ChainPage() {
                         </div>
                     )}
 
-                    {/* Share KINDCHAIN */}
+                    {/* Share KindChain */}
                     <div className="mt-14 rounded-3xl bg-[var(--invert-bg)] p-8 text-center text-[var(--invert-text)]">
-                        <p className="text-sm font-medium tracking-wide opacity-70">
-                            KINDCHAIN
-                        </p>
+                        <p className="text-sm font-medium tracking-wide opacity-70">KINDCHAIN</p>
 
-                        <h2
-                            className="mt-3 text-3xl"
-                            style={{ fontFamily: "Fraunces, serif" }}
-                        >
-                            Someone helped you.
+                        <h2 className="mt-3 text-3xl" style={{ fontFamily: "Fraunces, serif" }}>
+                            Pass it forward.
                         </h2>
 
-                        <p className="mx-auto mt-3 max-w-lg leading-relaxed opacity-80">
-                            You don&apos;t owe them anything.
-                            <br />
-                            Help someone else discover KINDCHAIN.
+                        <p className="mx-auto mt-3 max-w-md leading-relaxed opacity-80">
+                            Share the link and help someone else start their own chain.
                         </p>
 
-                        <button
-                            onClick={async () => {
-                                const shareData = {
-                                    title: "KINDCHAIN",
-                                    text: "One good deed shouldn’t end with you. Join KINDCHAIN and pass kindness forward.",
-                                    url: window.location.origin,
-                                };
-
-                                try {
-                                    if (navigator.share) {
-                                        await navigator.share(shareData);
-                                    } else {
-                                        await navigator.clipboard.writeText(
-                                            `${shareData.text}\n${shareData.url}`
-                                        );
-
-                                        alert("KINDCHAIN link copied!");
-                                    }
-                                } catch (error) {
-                                    // User closed the share dialog — nothing to do.
-                                    console.log("Share cancelled");
-                                }
-                            }}
-                            className="mt-7 rounded-xl bg-[var(--invert-text)] px-6 py-3 font-medium text-[var(--invert-bg)] transition hover:opacity-85"
-                        >
-                            Share KINDCHAIN ↗
-                        </button>
-
-                        <p className="mt-4 text-xs opacity-50">
-                            One good deed shouldn&apos;t end with you.
-                        </p>
+                        <div className="mx-auto mt-6 flex max-w-sm items-center gap-2 rounded-xl border border-white/15 bg-white/5 p-1.5">
+                            <span className="flex-1 truncate px-3 text-left text-sm opacity-80">
+                                {typeof window !== "undefined" ? window.location.origin : "kindchain.app"}
+                            </span>
+                            <button
+                                onClick={handleShare}
+                                className="shrink-0 rounded-lg bg-[var(--invert-text)] px-4 py-2 text-sm font-medium text-[var(--invert-bg)] transition hover:opacity-85"
+                            >
+                                {copied ? "Copied!" : "Share"}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </main>
